@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bitget XAUUSD Monitor</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&family=JetBrains+Mono&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-color: #0d1117;
+            --glass-bg: rgba(255, 255, 255, 0.05);
+            --glass-border: rgba(255, 255, 255, 0.1);
+            --accent-primary: #58a6ff;
+            --accent-success: #3fb950;
+            --accent-danger: #f85149;
+            --text-primary: #c9d1d9;
+            --text-header: #ffffff;
+        }
+
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-primary);
+            font-family: 'Inter', sans-serif;
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 1200px;
+        }
+
+        h1 {
+            font-weight: 800;
+            letter-spacing: -1px;
+            color: var(--text-header);
+            margin-bottom: 30px;
+        }
+
+        /* Glass Cards */
+        .glass-card {
+            background: var(--glass-bg);
+            backdrop-filter: blur(10px);
+            border: 1px solid var(--glass-border);
+            border-radius: 16px;
+            padding: 24px;
+            margin-bottom: 24px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+        }
+
+        .stat-item {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .stat-label {
+            font-size: 0.8rem;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: #8b949e;
+            margin-bottom: 4px;
+        }
+
+        .stat-value {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 1.5rem;
+            font-weight: 600;
+        }
+
+        .value-long { color: var(--accent-success); }
+        .value-short { color: var(--accent-danger); }
+        .value-neutral { color: var(--accent-primary); }
+
+        /* Table Styles */
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-family: 'Inter', sans-serif;
+        }
+
+        th {
+            text-align: left;
+            padding-bottom: 12px;
+            color: #8b949e;
+            font-weight: 600;
+            border-bottom: 1px solid var(--glass-border);
+        }
+
+        td {
+            padding: 12px 0;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.9rem;
+        }
+
+        .pnl-plus { color: var(--accent-success); }
+        .pnl-minus { color: var(--accent-danger); }
+
+        /* Chart Area */
+        .chart-container {
+            height: 350px;
+            width: 100%;
+        }
+
+        /* Animations */
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .glass-card { animation: fadeIn 0.6s ease-out forwards; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>XAUUSD Trading System Dashboard</h1>
+
+        <!-- Real-time Status -->
+        <div class="glass-card" id="status-card">
+            <div class="stats-grid">
+                <div class="stat-item">
+                    <span class="stat-label">Position</span>
+                    <span id="pos-info" class="stat-value">NONE</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-label">Current Equity</span>
+                    <span id="equity-val" class="stat-value">0.00</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-label">Paper Total PnL</span>
+                    <span id="paper-pnl" class="stat-value">0.00</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-label">Trade Count</span>
+                    <span id="trade-count" class="stat-value">0</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Equity Chart -->
+        <div class="glass-card">
+            <div class="stat-label" style="margin-bottom: 15px;">Equity Curve</div>
+            <div class="chart-container">
+                <canvas id="equityChart"></canvas>
+            </div>
+        </div>
+
+        <!-- Trade History -->
+        <div class="glass-card">
+            <div class="stat-label" style="margin-bottom: 15px;">Recent Trades</div>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Time</th>
+                        <th>Side</th>
+                        <th>Entry</th>
+                        <th>Exit</th>
+                        <th>Net PnL</th>
+                        <th>Reason</th>
+                    </tr>
+                </thead>
+                <tbody id="trades-body">
+                    <!-- Loaded dynamically -->
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+        let equityChart;
+
+        async function updateDashboard() {
+            try {
+                // 1. Update Status
+                const statusRes = await fetch('/api/status');
+                const status = await statusRes.json();
+                
+                if (status.position) {
+                    const side = status.position.side;
+                    document.getElementById('pos-info').textContent = `${side.toUpperCase()} ${status.position.size}`;
+                    document.getElementById('pos-info').className = `stat-value ${side === 'long' ? 'value-long' : 'value-short'}`;
+                } else {
+                    document.getElementById('pos-info').textContent = 'NONE';
+                    document.getElementById('pos-info').className = 'stat-value value-neutral';
+                }
+
+                document.getElementById('equity-val').textContent = status.equity ? status.equity.toFixed(2) : '0.00';
+                
+                if (status.paper_stats) {
+                    document.getElementById('paper-pnl').textContent = status.paper_stats.total_pnl.toFixed(2);
+                    document.getElementById('paper-pnl').className = `stat-value ${status.paper_stats.total_pnl >= 0 ? 'value-long' : 'value-short'}`;
+                    document.getElementById('trade-count').textContent = status.paper_stats.trades;
+                }
+
+                // 2. Update Trades
+                const tradesRes = await fetch('/api/trades');
+                const trades = await tradesRes.json();
+                const body = document.getElementById('trades-body');
+                body.innerHTML = trades.map(t => {
+                    const date = new Date(t.exit_time).toLocaleString('ja-JP', {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'});
+                    return `
+                        <tr>
+                            <td>${date}</td>
+                            <td class="${t.side === 'long' ? 'value-long' : 'value-short'}">${t.side.toUpperCase()}</td>
+                            <td>${t.entry_price.toFixed(2)}</td>
+                            <td>${t.exit_price.toFixed(2)}</td>
+                            <td class="${t.net_pnl >= 0 ? 'pnl-plus' : 'pnl-minus'}">${t.net_pnl >= 0 ? '+' : ''}${t.net_pnl.toFixed(2)}</td>
+                            <td>${t.exit_reason || '-'}</td>
+                        </tr>
+                    `;
+                }).join('');
+
+                // 3. Update Chart
+                const equityRes = await fetch('/api/equity');
+                const equityData = await equityRes.json();
+                if (equityData.length > 0) {
+                    updateChart(equityData);
+                }
+
+            } catch (err) {
+                console.error('Update failed:', err);
+            }
+        }
+
+        function updateChart(data) {
+            const ctx = document.getElementById('equityChart').getContext('2d');
+            const labels = data.map(d => new Date(d.time).toLocaleTimeString());
+            const values = data.map(d => d.equity);
+
+            if (equityChart) {
+                equityChart.data.labels = labels;
+                equityChart.data.datasets[0].data = values;
+                equityChart.update();
+            } else {
+                equityChart = new Chart(ctx, {
+                    type: 'line',
+                    data: {
+                        labels: labels,
+                        datasets: [{
+                            label: 'Equity',
+                            data: values,
+                            borderColor: '#58a6ff',
+                            backgroundColor: 'rgba(88, 166, 255, 0.1)',
+                            fill: true,
+                            tension: 0.4,
+                            pointRadius: 0
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        scales: {
+                            x: { display: false },
+                            y: { grid: { color: 'rgba(255,255,255,0.05)' } }
+                        },
+                        plugins: { legend: { display: false } }
+                    }
+                });
+            }
+        }
+
+        setInterval(updateDashboard, 5000);
+        updateDashboard();
+    </script>
+</body>
+</html>
